@@ -10,8 +10,8 @@ datasets = Path("datasets/")
 
 dependencies  = Path("dependencies/")
 
-
-scenarios = ["ssp119","ssp126","ssp245","ssp370","ssp434","ssp460","ssp534-over","ssp585"]
+scenarios = ["ssp119","ssp126","ssp434","ssp534-over"]
+ends = ["netzero","ZEC"]
 
 # List of scenarios
 
@@ -23,7 +23,7 @@ rule process_ZECMIP:
 
 rule all:
     input:
-        expand("results/fair/{scenario}.pkl", scenario=scenarios)
+        expand("results/fair/{scenario}_{end}.pkl", scenario=scenarios, end=ends)
 
 rule fig_1:
     input:
@@ -35,7 +35,8 @@ rule fig_1:
 
 rule fig_2:
     input:
-        "results/ZECMIP_data.json"
+        "results/ZECMIP_data.json",
+        "results/fair/historical_netzero.nc"        
     output:
         "results/figures/fig_2.pdf",
     notebook:
@@ -50,30 +51,58 @@ rule fig_3:
     notebook:
         "notebooks/fig_3.ipynb"        
 
+# rule run_scenario:
+#     input:
+#         "workflow/scripts/utils.py"        
+#     output:
+#         "results/fair/{scenario}.pkl"
+#         "results/fair/{scenario}.nc"        
+#     params:
+#         final_year=3000,
+#         ZEC_year=2100
+#     script:
+#         "scripts/run_ssp.py"
+
 rule run_scenario:
     input:
         "workflow/scripts/utils.py"        
     output:
-        "results/fair/{scenario}.pkl"
-        "results/fair/{scenario}.nc"        
+        output_pkl="results/fair/{scenario}_{end}.pkl",
+        output_nc="results/fair/{scenario}_{end}.nc",
     params:
         final_year=3000,
         ZEC_year=2100
     script:
         "scripts/run_ssp.py"
 
+
 rule run_historical:
     input:
-        "workflow/scripts/utils.py"    
+        "workflow/scripts/utils.py"        
     output:
-        "results/fair/historical.pkl"
-        "results/fair/historical.nc"            
+        output_pkl="results/fair/historical_{end}.pkl",
+        output_nc="results/fair/historical_{end}.nc",
     params:
-        scenario = "ssp245",
-        final_year = 3000,
-        ZEC_year = 2024,
+        final_year=3000,
+        ZEC_year=2100,
+        scenario="ssp245",                
     script:
         "scripts/run_ssp.py"
+        
+# rule run_historical:
+#     input:
+#         "workflow/scripts/utils.py"    
+#     output:
+#         "results/fair/historical_{end}.pkl"
+#         "results/fair/historical_{end}.nc"            
+#     params:
+#         scenario = "ssp245",
+#         final_year = 3000,
+#         ZEC_year = 2024,
+#     wildcard_constraints:
+#         end="netzero|ZEC"        
+#     script:
+#         "scripts/run_ssp.py"
         
 ## help               : prints help comments for Snakefile
 rule help:

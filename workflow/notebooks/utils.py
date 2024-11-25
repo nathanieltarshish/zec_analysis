@@ -8,6 +8,7 @@ import pandas as pd
 from fair import FAIR
 from fair.interface import fill, initialise
 from fair.io import read_properties
+import os
 
 def gen_fair_ensemble(
     scenarios,
@@ -15,10 +16,11 @@ def gen_fair_ensemble(
     ensemble_members=841,
     relax_land=False,
     relax_land_year=None,
-    ZEC_year=2100, 
+    ZEC_year=2100,
+    zero_CO2_only=False
 ):
 
-    prefix = "/home/tarshish/Documents/research/ZEC/datasets/fair_calibrate"
+    prefix = "datasets/fair_calibrate"
     fair_v = "2.1.3"
     cal_v = "1.4"
     constraint_set = "all-2022"
@@ -331,11 +333,53 @@ def gen_fair_ensemble(
         .drop("config")
         * np.ones((1, 1, ensemble_members, 1))
     )
-    
-    future = f.emissions.where(f.emissions.timepoints > ZEC_year, drop=True)
-    future = future.fillna(0.0)*0 + f.species_configs.baseline_emissions
-    past = f.emissions.where(f.emissions.timepoints <= ZEC_year, drop=True)
-    f.emissions = xr.concat([past, future], dim='timepoints')
+
+    if zero_CO2_only:
+        # Define CO2 species
+        co2_species = ["CO2 FFI", "CO2 AFOLU"]
+
+        # Select CO2 emissions at all timepoints
+        co2_emissions = f.emissions.sel(specie=co2_species)
+
+        # Sum of CO2 emissions over the specie dimension
+        total_co2_emissions = co2_emissions.sum(dim="specie")
+
+        # Find timepoints where the sum of CO2 emissions is negative
+        negative_timepoints = total_co2_emissions.where(
+            total_co2_emissions <= 0, drop=True
+        ).timepoints
+
+        # check if there are any negative timepoints
+        if negative_timepoints.size > 0:
+            # Select baseline CO2 emissions
+            baseline_co2 = f.species_configs.baseline_emissions.sel(specie=co2_species)
+
+            # Assign baseline emissions to CO2 species at negative timepoints
+            f.emissions.loc[dict(
+                specie=co2_species, timepoints=negative_timepoints
+            )] = baseline_co2
+
+        # For non-CO2 emissions after 2100, set to constant values (emissions at 2100)
+        non_co2_species = [specie for specie in f.emissions.specie.values if specie not in co2_species]
+        future_timepoints_non_co2 = f.emissions.timepoints.where(
+            f.emissions.timepoints > 2100, drop=True
+        )
+
+        # Check if there are any future timepoints beyond 2100
+        if future_timepoints_non_co2.size > 0:
+            # Get emissions at 2100 for non-CO2 species
+            emis_2100 = f.emissions.sel(timepoints=2100, method="nearest").sel(specie=non_co2_species)
+
+            # Assign emissions at 2100 to future timepoints for non-CO2 species
+            f.emissions.loc[dict(
+                specie=non_co2_species, timepoints=future_timepoints_non_co2
+            )] = emis_2100
+    else:
+        # Original behavior: set all emissions to baseline after ZEC_year
+        future = f.emissions.where(f.emissions.timepoints > ZEC_year, drop=True)
+        future = future.fillna(0.0) * 0 + f.species_configs.baseline_emissions
+        past = f.emissions.where(f.emissions.timepoints <= ZEC_year, drop=True)
+        f.emissions = xr.concat([past, future], dim="timepoints")
 
     return f
 
