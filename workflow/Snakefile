@@ -1,0 +1,156 @@
+from pathlib import Path
+from glob import glob
+import os
+
+# the datasets folder contains the raw downloaded external Zenodo datasets 
+datasets = Path("datasets/")
+
+# the dependencies folder contains the subset of files extracted from these datasets
+# that are specifically required for this workflow 
+
+dependencies  = Path("dependencies/")
+
+
+scenarios = ["ssp119","ssp126","ssp245","ssp370","ssp434","ssp460","ssp534-over","ssp585"]
+
+# List of scenarios
+
+rule process_ZECMIP:
+    output:
+        "results/ZECMIP_data.json"
+    notebook:
+        "notebooks/process_ZECMIP.py.ipynb"
+
+rule all:
+    input:
+        expand("results/fair/{scenario}.pkl", scenario=scenarios)
+
+rule fig_1:
+    input:
+        "results/ZECMIP_data.json"
+    output:
+        "results/figures/fig_1.pdf",
+    notebook:
+        "notebooks/fig_1.ipynb"
+
+rule fig_2:
+    input:
+        "results/ZECMIP_data.json"
+    output:
+        "results/figures/fig_2.pdf",
+    notebook:
+        "notebooks/fig_2.ipynb"
+
+rule fig_3:
+    input:
+        expand("results/fair/{scenario}.nc", scenario=scenarios),
+        "results/fair/historical.nc",
+    output:
+        "results/figures/fig_3.pdf",
+    notebook:
+        "notebooks/fig_3.ipynb"        
+
+rule run_scenario:
+    input:
+        "workflow/scripts/utils.py"        
+    output:
+        "results/fair/{scenario}.pkl"
+        "results/fair/{scenario}.nc"        
+    params:
+        final_year=3000,
+        ZEC_year=2100
+    script:
+        "scripts/run_ssp.py"
+
+rule run_historical:
+    input:
+        "workflow/scripts/utils.py"    
+    output:
+        "results/fair/historical.pkl"
+        "results/fair/historical.nc"            
+    params:
+        scenario = "ssp245",
+        final_year = 3000,
+        ZEC_year = 2024,
+    script:
+        "scripts/run_ssp.py"
+        
+## help               : prints help comments for Snakefile
+rule help:
+    input:
+        "workflow/Snakefile",
+    shell:
+        "sed -n 's/^##//p' {input}"        
+    
+# Setting up the datasets and computational environment
+# -------------------------------------------------------------
+
+## install_fair: downloads the FaIR model from github
+rule install_fair:
+    shell:
+        """
+        set -e
+        
+        cd dependencies
+
+        if [ -d "FAIR" ]; then
+            echo "FaIR directory exists."
+            read -p "Do you want to remove the existing installation? (y/n) " choice
+            if [ "$choice" = "y" ]; then
+                echo "Removing existing installation..."
+                rm -rf FAIR
+            else
+                echo "Keeping existing installation."
+                exit 0
+            fi
+        fi
+
+        echo "Initializing FaIR repository..."
+        git init FAIR
+        cd FAIR
+
+        echo "Downloading FaIR repository from GitHub (specific commit)..."
+        git remote add origin https://github.com/OMS-NetZero/FAIR
+        git fetch --depth 1 origin 395ab8a4f74d1438fb6075410961942019a9b58f
+        git checkout 395ab8a4f74d1438fb6075410961942019a9b58f
+
+        echo "Patching with code additions required for this attribution study..."
+        cp ../fair.patch .
+        git apply fair.patch
+
+        echo "Installing with pip..."
+        pip install -e .
+
+        echo "FaIR is installed (and patched with additions) at dependencies/FAIR"
+        """
+        
+## download_data: downloads all external data needed for workflow to datasets folder
+rule download_data:
+    # snakemake deletes the output before rerunning the rule, so we do not explicitly
+    # list the output here, as we do not want to delete it each time 
+    script:
+        "scripts/download_data.py"
+
+rule tex:
+    input:
+        'paper/main.tex',
+        'paper/ZEC.bib',
+        expand('results/figures/{figure}.pdf',
+               figure=["fig_1",
+                       "fig_2",
+                       "fig_3"],
+               ),
+        
+    output:
+        'paper/main.pdf',
+         expand('paper/figures/{figure}.pdf',
+                        figure=["fig_1",
+                                "fig_2",
+                                "fig_3"],
+                        ),        
+    shell:
+        """
+        cp results/figures/*fig*.pdf paper/figures/
+        cd paper
+        latexmk -g main
+        """

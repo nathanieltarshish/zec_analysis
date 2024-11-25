@@ -1,0 +1,3 @@
+[submodule "paper"]
+	path = paper
+	url = git@github.com:nathanieltarshish/zec_draft.git

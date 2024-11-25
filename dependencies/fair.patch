@@ -1,0 +1,160 @@
+diff --git a/src/fair/fair.py b/src/fair/fair.py
+index c6b0c4f..7489780 100644
+--- a/src/fair/fair.py
++++ b/src/fair/fair.py
+@@ -1,5 +1,4 @@
+ """Finite-amplitude Impulse Response (FaIR) simple climate model."""
+-
+ import copy
+ import os
+ import warnings
+@@ -91,6 +90,8 @@ class FAIR:
+         ghg_method="meinshausen2020",
+         ch4_method="leach2021",
+         temperature_prescribed=False,
++        relax_land=False,
++        relax_land_year=2023.,
+     ):
+         """Initialise FaIR."""
+         self._ghg_method = ghg_method
+@@ -102,7 +103,8 @@ class FAIR:
+         self._n_gasboxes = n_gasboxes
+         self._n_layers = n_layers
+         self.temperature_prescribed = temperature_prescribed
+-
++        self.relax_land = relax_land
++        self.relax_land_year = relax_land_year
+     # must be a less cumbsersome way to code this
+     @property
+     def ch4_method(self):
+@@ -930,6 +932,89 @@ class FAIR:
+                     # fill FaIR xarray
+                     fill(self.forcing, forc[:, None], specie=specie, scenario=scenario)
+ 
++
++    def fill_from_custom(self, df_emis):
++        """Fill emissions from custom CSV file used in fossil vs. other activity attribution study.
++        """
++        # lookup converting FaIR default names to RCMIP names
++        species_to_rcmip = {specie: specie.replace("-", "") for specie in self.species}
++        species_to_rcmip["CO2 FFI"] = "CO2|FFI"
++        species_to_rcmip["CO2 AFOLU"] = "CO2|AFOLU"
++        species_to_rcmip_copy = copy.deepcopy(species_to_rcmip)
++
++        for specie in species_to_rcmip_copy:
++            if specie not in self.species:
++                del species_to_rcmip[specie]
++
++        for scenario in self.scenarios:
++            for specie, specie_rcmip_name in species_to_rcmip.items():
++                if self.properties_df.loc[specie, "input_mode"] == "emissions":
++                    # Grab raw emissions from dataframe
++                    emis_in = (
++                        df_emis.loc[
++                            (df_emis["Scenario"] == scenario)
++                            & (
++                                df_emis["Variable"].str.endswith(
++                                    "|" + specie_rcmip_name
++                                )
++                            )
++                            & (df_emis["Region"] == "World"),
++                            "1750":None,
++                        ]
++                        .interpolate(axis=1)
++                        .values.squeeze()
++                    )
++
++                    # set emissions to zero if data missing
++                    if emis_in.shape[0] != 0:
++
++                        # avoid NaNs from outside the interpolation range being mixed into
++                        # the results
++                        notnan = np.nonzero(~np.isnan(emis_in))
++
++                        # RCMIP are "annual averages"; for emissions this is basically
++                        # the emissions over the year, for concentrations and forcing
++                        # it would be midyear values. In every case, we can assume
++                        # midyear values and interpolate to our time grid.
++                        rcmip_index = np.arange(1750.5, 2501.5)
++                        interpolator = interp1d(
++                            rcmip_index[notnan],
++                            emis_in[notnan],
++                            fill_value="extrapolate",
++                            bounds_error=False,
++                        )
++                        emis = interpolator(self.timepoints)
++                        # We won't throw an error if the time is out of range for RCMIP,
++                        # but we will fill with NaN to allow a user to manually specify
++                        emis[self.timepoints < 1750] = np.nan
++
++                    else:
++                        emis = np.zeros(len(self.timepoints))
++
++                    # Parse and possibly convert unit in input file to what FaIR wants
++                    unit = df_emis.loc[
++                        (df_emis["Scenario"] == scenario)
++                        & (df_emis["Variable"].str.endswith("|" + specie_rcmip_name))
++                        & (df_emis["Region"] == "World"),
++                        "Unit",
++                    ].values[0]
++                    emis = emis * (
++                        prefix_convert[unit.split()[0]][
++                            desired_emissions_units[specie].split()[0]
++                        ]
++                        * compound_convert[unit.split()[1].split("/")[0]][
++                            desired_emissions_units[specie].split()[1].split("/")[0]
++                        ]
++                        * time_convert[unit.split()[1].split("/")[1]][
++                            desired_emissions_units[specie].split()[1].split("/")[1]
++                        ]
++                    )
++
++                    # fill FaIR xarray
++                    fill(
++                        self.emissions, emis[:, None], specie=specie, scenario=scenario
++                    )
++
+     # climate response
+     def _make_ebms(self):
+         # First check for NaNs
+@@ -1028,10 +1113,11 @@ class FAIR:
+                 ]
+             ):
+                 raise ValueError(
+-                    "co2 in calculated mode requires co2 ffi and co2 afolu in "
++                    "co2 in calculated mode requires co2 ffi or co2 afolu in "
+                     "emissions mode."
+                 )
+ 
++
+         if "land use" in list(
+             self.properties_df.loc[self.properties_df["input_mode"] == "calculated"][
+                 "type"
+@@ -1488,6 +1574,27 @@ class FAIR:
+                         self._aerosol_chemistry_from_concentration_indices,
+                     )
+ 
++                # Addition. relax the land back to the pre-industrial values on a 100 year e-folding timescale
++                # for use in the full regrowth scenarios
++                if self.relax_land == True:
++                    if self.timepoints[i_timepoint] > self.relax_land_year:
++                        land_timescale = 100.
++                        #the "negative" emissions due to regrowth on abandoned AFOLU land
++                        emissions_array[i_timepoint, ..., self._co2_afolu_indices] = - \
++                        (cumulative_emissions_array[i_timepoint, ..., self._co2_afolu_indices])/land_timescale
++                        emissions_array[i_timepoint, ..., self._co2_indices] = emissions_array[i_timepoint, ..., self._co2_afolu_indices]
++
++                    #decrease the cumulative CO2 from AFOLU given regrowth this timestep
++                    cumulative_emissions_array[
++                        i_timepoint + 1, ..., self._co2_afolu_indices
++                    ] = (
++                        cumulative_emissions_array[
++                            i_timepoint, ..., self._co2_afolu_indices
++                        ]
++                        + emissions_array[i_timepoint, ..., self._co2_afolu_indices]
++                        * self.timestep
++                    )
++
+                 # 3. greenhouse emissions to concentrations; include methane from IIRF
+                 (
+                     concentration_array[
