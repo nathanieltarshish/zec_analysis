@@ -8,7 +8,7 @@ try:
     scenario = snakemake.params.scenario
 except:
     scenario = snakemake.wildcards.scenario
-
+    
 final_year = snakemake.params.final_year
 ZEC_year = snakemake.params.ZEC_year
 output_pkl = snakemake.output.output_pkl

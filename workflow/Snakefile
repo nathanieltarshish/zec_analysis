@@ -23,7 +23,8 @@ rule process_ZECMIP:
 
 rule all:
     input:
-        expand("results/fair/{scenario}_{end}.pkl", scenario=scenarios, end=ends)
+        expand("results/fair/{scenario}_{end}.pkl", scenario=scenarios, end=ends),
+        expand("results/fair/historical_{end}.pkl", scenario=scenarios, end=ends)
 
 rule fig_1:
     input:
@@ -72,6 +73,8 @@ rule run_scenario:
     params:
         final_year=3000,
         ZEC_year=2100
+    wildcard_constraints:
+        scenario="(?!historical).*"
     script:
         "scripts/run_ssp.py"
 
@@ -84,7 +87,7 @@ rule run_historical:
         output_nc="results/fair/historical_{end}.nc",
     params:
         final_year=3000,
-        ZEC_year=2100,
+        ZEC_year=2024,
         scenario="ssp245",                
     script:
         "scripts/run_ssp.py"
