@@ -10,11 +10,17 @@ datasets = Path("datasets/")
 
 dependencies  = Path("dependencies/")
 
-scenarios = ["ssp119","ssp126","ssp434","ssp534-over"]
-ends = ["netzero","ZEC"]
+scenarios = ["historical","ssp119","ssp126","ssp534-over"]
+ends = ["zec","decay"]
 
 # List of scenarios
 
+rule make_emissions:
+    output:
+        "results/emissions.nc"
+    script:
+        "results/emissions.nc"
+        
 rule process_ZECMIP:
     output:
         "results/ZECMIP_data.json"
@@ -66,31 +72,15 @@ rule fig_3:
 
 rule run_scenario:
     input:
-        "workflow/scripts/utils.py"        
+        "workflow/scripts/utils.py",
+        "results/emissions.nc"                
     output:
         output_pkl="results/fair/{scenario}_{end}.pkl",
         output_nc="results/fair/{scenario}_{end}.nc",
     params:
         final_year=3000,
-        ZEC_year=2100
-    wildcard_constraints:
-        scenario="(?!historical).*"
     script:
-        "scripts/run_ssp.py"
-
-
-rule run_historical:
-    input:
-        "workflow/scripts/utils.py"        
-    output:
-        output_pkl="results/fair/historical_{end}.pkl",
-        output_nc="results/fair/historical_{end}.nc",
-    params:
-        final_year=3000,
-        ZEC_year=2024,
-        scenario="ssp245",                
-    script:
-        "scripts/run_ssp.py"
+        "scripts/run_scenario.py"
         
 # rule run_historical:
 #     input:

@@ -10,6 +10,26 @@ from fair.interface import fill, initialise
 from fair.io import read_properties
 import os
 
+def get_path(path):
+    absolute_path = "/home/tarshish/Documents/research/zec/"
+    return absolute_path + path 
+
+def decay_emissions(f, year, tau=100):
+    net_zero_emissions = f.emissions.sel(timepoints=year)
+    future = f.emissions.where(f.emissions.timepoints > year, drop=True)                                                                                           
+    t = future.timepoints - year
+    baseline = f.species_configs.baseline_emissions
+    decaying_emissions = net_zero_emissions*np.exp(-t/tau) + (1 - np.exp(-t/tau))*baseline    
+    decaying_emissions = decaying_emissions.transpose("timepoints", "scenario", "config", "specie")
+    past = f.emissions.where(f.emissions.timepoints <= year, drop=True)                                                                                            
+    f.emissions = xr.concat([past, decaying_emissions], dim="timepoints")
+    
+def ZEC_emissions(f, year):
+    future = f.emissions.where(f.emissions.timepoints > year, drop=True)                                                                                           
+    future = future.fillna(0.0) * 0 + f.species_configs.baseline_emissions                                                                                             
+    past = f.emissions.where(f.emissions.timepoints <= year, drop=True)                                                                                            
+    f.emissions = xr.concat([past, future], dim="timepoints")
+
 def gen_fair_ensemble(
     scenarios,
     final_year=2040,
@@ -18,14 +38,13 @@ def gen_fair_ensemble(
     relax_land_year=None,
 ):
 
-    prefix = "../../datasets/fair_calibrate"
+    prefix = get_path("datasets/fair_calibrate")
     fair_v = "2.1.3"
     cal_v = "1.4"
     constraint_set = "all-2022"
 
     calibration_dir=prefix+f"/output/fair-{fair_v}/v{cal_v}/{constraint_set}/calibrations/"
     posterior_dir=prefix+f"/output/fair-{fair_v}/v{cal_v}/{constraint_set}/posteriors/"
-    emissions_file = prefix + f"/output/fair-{fair_v}/v{cal_v}/{constraint_set}/emissions/ssps_harmonized_1750-2499.nc"
 
     methane_config = calibration_dir+"CH4_lifetime.csv"
     calibrated_params = posterior_dir+"calibrated_constrained_parameters.csv"
@@ -38,7 +57,7 @@ def gen_fair_ensemble(
     df_landuse = pd.read_csv(landuse_factors, index_col=0)
     df_lapsi = pd.read_csv(lapsi_factors, index_col=0)
 
-    da_emissions = xr.load_dataarray(emissions_file)    
+    da_emissions = xr.load_dataarray(get_path("results/emissions.nc"))
 
     # instantiate model with SSP defaults
     df_configs_subset = df_configs[:ensemble_members]
@@ -620,3 +639,9 @@ def get_title(scenario):
    }
 
    return fancy_titles[scenario]
+
+def get_net_zero_GHG_time(scenario):
+    
+    net_zero_times = {'historical': 2025.5, 'ssp119': 2081.5, 'ssp126': 2088.5, 'ssp534-over': 2073.5}
+
+    return net_zero_times[scenario]
