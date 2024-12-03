@@ -11,26 +11,31 @@ datasets = Path("datasets/")
 dependencies  = Path("dependencies/")
 
 scenarios = ["historical","ssp119","ssp126","ssp534-over"]
-ends = ["zec","decay"]
+ends = ["zec"]
 
 # List of scenarios
+rule all:
+    input:
+        expand("results/fair/{scenario}_{end}.pkl", scenario=scenarios, end=ends)
 
+rule find_net_zero_GHG:
+    output:
+        "results/net_zero_times.nc"
+        "results/figures/net_zero_times.pdf"
+    notebook:
+        "notebooks/find_net_zero_GHG"
+        
 rule make_emissions:
     output:
         "results/emissions.nc"
     script:
-        "results/emissions.nc"
+        "scripts/make_emissions.py"
         
 rule process_ZECMIP:
     output:
         "results/ZECMIP_data.json"
     notebook:
         "notebooks/process_ZECMIP.py.ipynb"
-
-rule all:
-    input:
-        expand("results/fair/{scenario}_{end}.pkl", scenario=scenarios, end=ends),
-        expand("results/fair/historical_{end}.pkl", scenario=scenarios, end=ends)
 
 rule fig_1:
     input:
@@ -43,7 +48,7 @@ rule fig_1:
 rule fig_2:
     input:
         "results/ZECMIP_data.json",
-        "results/fair/historical_netzero.nc"        
+        "results/fair/historical_zec.nc"        
     output:
         "results/figures/fig_2.pdf",
     notebook:
@@ -51,24 +56,11 @@ rule fig_2:
 
 rule fig_3:
     input:
-        expand("results/fair/{scenario}.nc", scenario=scenarios),
-        "results/fair/historical.nc",
+        expand("results/fair/{scenario}_zec.nc", scenario=scenarios),
     output:
         "results/figures/fig_3.pdf",
     notebook:
         "notebooks/fig_3.ipynb"        
-
-# rule run_scenario:
-#     input:
-#         "workflow/scripts/utils.py"        
-#     output:
-#         "results/fair/{scenario}.pkl"
-#         "results/fair/{scenario}.nc"        
-#     params:
-#         final_year=3000,
-#         ZEC_year=2100
-#     script:
-#         "scripts/run_ssp.py"
 
 rule run_scenario:
     input:
@@ -81,21 +73,6 @@ rule run_scenario:
         final_year=3000,
     script:
         "scripts/run_scenario.py"
-        
-# rule run_historical:
-#     input:
-#         "workflow/scripts/utils.py"    
-#     output:
-#         "results/fair/historical_{end}.pkl"
-#         "results/fair/historical_{end}.nc"            
-#     params:
-#         scenario = "ssp245",
-#         final_year = 3000,
-#         ZEC_year = 2024,
-#     wildcard_constraints:
-#         end="netzero|ZEC"        
-#     script:
-#         "scripts/run_ssp.py"
         
 ## help               : prints help comments for Snakefile
 rule help:
