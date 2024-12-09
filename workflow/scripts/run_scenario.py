@@ -4,11 +4,8 @@ import pickle
 import os
 
 # Access parameters and wildcards from Snakemake
-try:
-    scenario = snakemake.params.scenario
-except:
-    scenario = snakemake.wildcards.scenario
-    
+
+scenario = snakemake.wildcards.scenario
 final_year = snakemake.params.final_year
 output_pkl = snakemake.output.output_pkl
 output_nc = snakemake.output.output_nc

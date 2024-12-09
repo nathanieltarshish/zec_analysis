@@ -21,8 +21,8 @@ def decay_emissions(f, year, tau=100):
     baseline = f.species_configs.baseline_emissions
     decaying_emissions = net_zero_emissions*np.exp(-t/tau) + (1 - np.exp(-t/tau))*baseline    
     decaying_emissions = decaying_emissions.transpose("timepoints", "scenario", "config", "specie")
-    past = f.emissions.where(f.emissions.timepoints <= year, drop=True)                                                                                            
-    f.emissions = xr.concat([past, decaying_emissions], dim="timepoints")
+    prior = f.emissions.where(f.emissions.timepoints <= year, drop=True)                                                                                            
+    f.emissions = xr.concat([prior, decaying_emissions], dim="timepoints")
     
 def ZEC_emissions(f, year):
     future = f.emissions.where(f.emissions.timepoints > year, drop=True)                                                                                           
@@ -633,9 +633,9 @@ def get_title(scenario):
        "ssp370": "SSP3-7.0",
        "ssp434": "SSP4-3.4",
        "ssp460": "SSP4-6.0",
-       "ssp534-over": "SSP5-3.4-overshoot",
+       "ssp534-over": "SSP5-3.4",
        "ssp585": "SSP5-8.5",
-       "historical": "black",       
+       "historical": "historical",       
    }
 
    return fancy_titles[scenario]

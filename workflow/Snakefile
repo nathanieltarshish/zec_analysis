@@ -10,14 +10,19 @@ datasets = Path("datasets/")
 
 dependencies  = Path("dependencies/")
 
-scenarios = ["historical","ssp119","ssp126","ssp534-over"]
-ends = ["zec"]
+ssps = ["ssp119","ssp126","ssp534-over"]
+scenarios = ssps + ["historical"]
+ends = ["zec", "decay"]
+
+figures = ["fig_1", "fig_2", "fig_3", "sfig_cov","sfig_metrics", "sfig_diseq", "sfig_decay"]
 
 # List of scenarios
 rule all:
     input:
-        expand("results/fair/{scenario}_{end}.pkl", scenario=scenarios, end=ends)
-
+        expand("results/fair/{scenario}_{end}.pkl", scenario=ssps, end=ends),
+        expand("results/fair/{scenario}_{end}.pkl", scenario=["historical"], end=["zec"]),
+        expand("results/figures/{figure}.pdf", figure=figures)
+        
 rule find_net_zero_GHG:
     output:
         "results/net_zero_times.nc"
@@ -60,9 +65,41 @@ rule fig_3:
     output:
         "results/figures/fig_3.pdf",
     notebook:
-        "notebooks/fig_3.ipynb"        
+        "notebooks/fig_3.ipynb"
 
-rule run_scenario:
+rule sfig_cov:
+    input:
+        "results/fair/historical_zec.pkl"                
+    output:
+        "results/figures/sfig_cov.pdf"
+    notebook:
+        "notebooks/sfig_cov.ipynb"        
+
+rule sfig_diseq:
+    input:
+        expand("results/fair/{scenario}_zec.pkl", scenario=scenarios),        
+    output:
+        "results/figures/sfig_diseq.pdf"
+    notebook:
+        "notebooks/sfig_diseq.ipynb"
+
+rule sfig_metrics:
+    input:
+        "results/ZECMIP_data.json"        
+    output:
+        "results/figures/sfig_metrics.pdf"
+    notebook:
+        "notebooks/sfig_metrics.ipynb"
+
+rule sfig_decay:
+    input:
+        expand("results/fair/{scenario}_decay.nc", scenario=ssps)
+    output:
+        "results/figures/sfig_decay.pdf"
+    notebook:
+        "notebooks/sfig_decay.ipynb"                
+        
+rule run_zec:
     input:
         "workflow/scripts/utils.py",
         "results/emissions.nc"                
@@ -72,7 +109,7 @@ rule run_scenario:
     params:
         final_year=3000,
     script:
-        "scripts/run_scenario.py"
+        "scripts/run_scenario.py"        
         
 ## help               : prints help comments for Snakefile
 rule help:
@@ -135,18 +172,14 @@ rule tex:
         'paper/main.tex',
         'paper/ZEC.bib',
         expand('results/figures/{figure}.pdf',
-               figure=["fig_1",
-                       "fig_2",
-                       "fig_3"],
+               figure=figures,
                ),
         
     output:
         'paper/main.pdf',
          expand('paper/figures/{figure}.pdf',
-                        figure=["fig_1",
-                                "fig_2",
-                                "fig_3"],
-                        ),        
+                figure=figures,
+                ),
     shell:
         """
         cp results/figures/*fig*.pdf paper/figures/
