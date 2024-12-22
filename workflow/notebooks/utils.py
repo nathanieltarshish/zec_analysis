@@ -10,25 +10,107 @@ from fair.interface import fill, initialise
 from fair.io import read_properties
 import os
 
+
 def get_path(path):
     absolute_path = "/home/tarshish/Documents/research/zec/"
-    return absolute_path + path 
+    return absolute_path + path
+
 
 def decay_emissions(f, year, tau=100):
     net_zero_emissions = f.emissions.sel(timepoints=year)
-    future = f.emissions.where(f.emissions.timepoints > year, drop=True)                                                                                           
+    future = f.emissions.where(f.emissions.timepoints > year, drop=True)
     t = future.timepoints - year
     baseline = f.species_configs.baseline_emissions
-    decaying_emissions = net_zero_emissions*np.exp(-t/tau) + (1 - np.exp(-t/tau))*baseline    
+    decaying_emissions = net_zero_emissions * np.exp(-t / tau) + (1 - np.exp(-t / tau)) * baseline
     decaying_emissions = decaying_emissions.transpose("timepoints", "scenario", "config", "specie")
-    prior = f.emissions.where(f.emissions.timepoints <= year, drop=True)                                                                                            
+    prior = f.emissions.where(f.emissions.timepoints <= year, drop=True)
     f.emissions = xr.concat([prior, decaying_emissions], dim="timepoints")
-    
+
+
 def ZEC_emissions(f, year):
-    future = f.emissions.where(f.emissions.timepoints > year, drop=True)                                                                                           
-    future = future.fillna(0.0) * 0 + f.species_configs.baseline_emissions                                                                                             
-    past = f.emissions.where(f.emissions.timepoints <= year, drop=True)                                                                                            
+    future = f.emissions.where(f.emissions.timepoints > year, drop=True)
+    future = future.fillna(0.0) * 0 + f.species_configs.baseline_emissions
+    past = f.emissions.where(f.emissions.timepoints <= year, drop=True)
     f.emissions = xr.concat([past, future], dim="timepoints")
+
+
+def gen_fair_co2_only(scenarios, final_year=3000):
+
+    ensemble_members = 841
+    prefix = get_path("datasets/fair_calibrate")
+    fair_v = "2.1.3"
+    cal_v = "1.4"
+    constraint_set = "all-2022"
+
+    posterior_dir = prefix+f"/output/fair-{fair_v}/v{cal_v}/{constraint_set}/posteriors/"
+    calibrated_params = posterior_dir+"calibrated_constrained_parameters.csv"
+    calibration_dir = prefix+f"/output/fair-{fair_v}/v{cal_v}/{constraint_set}/calibrations/"
+    df_configs = pd.read_csv(calibrated_params, index_col=0)
+    df_configs_subset = df_configs[:ensemble_members]
+    valid_all = df_configs_subset.index
+
+    f = FAIR(ch4_method="leach2021") 
+    f.define_time(1750, final_year, 1)
+    f.define_scenarios(scenarios)
+    f.define_configs(valid_all)
+
+    species = ["CO2","CH4","N2O"]
+    props = {"CO2": {'type': "co2",'input_mode': "emissions",
+                     'greenhouse_gas': True,
+                     'aerosol_chemistry_from_emissions': False,
+                     'aerosol_chemistry_from_concentration': False}}
+
+    
+    #CH4 and N2O are fixed to preindustrial concentrations, and included only because
+    #the radiative transfer requires their concentrations be set to calculate CO2
+    #forcing 
+    for gas in ["CH4","N2O"]:
+        props[gas] = {'type': gas.lower(),'input_mode': 'concentration',
+                      'greenhouse_gas': True,
+                      'aerosol_chemistry_from_emissions': False,
+                      'aerosol_chemistry_from_concentration': False}
+        
+    f.define_species(species, props)
+    f.allocate()
+    f.fill_species_configs()
+
+    fill(f.climate_configs["ocean_heat_capacity"], df_configs_subset.loc[:, "clim_c1":"clim_c3"].values)
+    fill(f.climate_configs["ocean_heat_transfer"], df_configs_subset.loc[:, "clim_kappa1":"clim_kappa3"].values)
+    fill(f.climate_configs["deep_ocean_efficacy"], df_configs_subset["clim_epsilon"].values.squeeze())
+    fill(f.climate_configs["gamma_autocorrelation"], df_configs_subset["clim_gamma"].values.squeeze())
+    fill(f.climate_configs["sigma_eta"], df_configs_subset["clim_sigma_eta"].values.squeeze())
+    fill(f.climate_configs["sigma_xi"], df_configs_subset["clim_sigma_xi"].values.squeeze())
+    fill(f.climate_configs["seed"], df_configs_subset["seed"])
+    fill(f.climate_configs["stochastic_run"], False)
+    fill(f.climate_configs["use_seed"], False)
+    fill(f.climate_configs["forcing_4co2"], df_configs_subset["clim_F_4xCO2"])
+
+    fill(f.species_configs["iirf_0"], df_configs_subset["cc_r0"].values.squeeze(), specie="CO2")
+    fill(f.species_configs["iirf_airborne"], df_configs_subset["cc_rA"].values.squeeze(), specie="CO2")
+    fill(f.species_configs["iirf_uptake"], df_configs_subset["cc_rU"].values.squeeze(), specie="CO2")
+    fill(f.species_configs["iirf_temperature"], df_configs_subset["cc_rT"].values.squeeze(), specie="CO2")
+
+    fill(f.species_configs["forcing_scale"], df_configs_subset["fscale_CO2"].values.squeeze(), specie="CO2")
+    fill(f.species_configs["baseline_concentration"], df_configs_subset["cc_co2_concentration_1750"].values.squeeze(), specie="CO2")
+
+    initialise(f.forcing, 0)
+    initialise(f.temperature, 0)
+    initialise(f.cumulative_emissions, 0)
+    initialise(f.airborne_emissions, 0)
+    fill(f.emissions, 0)
+    fill(f.concentration, f.species_configs["baseline_concentration"].sel(specie="CH4"), specie="CH4")
+    fill(f.concentration, f.species_configs["baseline_concentration"].sel(specie="N2O"), specie="N2O")
+
+    da_emissions = xr.load_dataarray(get_path("results/emissions.nc"))     
+    ssp_CO2_emissions = da_emissions.sel(specie=["CO2 FFI", "CO2 AFOLU"]).sum("specie")
+    ssp_CO2_emissions = ssp_CO2_emissions.sel(scenario=f.scenarios).squeeze("config", drop=True)
+
+    emissions_aligned, _ = xr.align(f.emissions, ssp_CO2_emissions, join='inner')
+    common_timepoints = emissions_aligned.timepoints
+    f.emissions.loc[dict(timepoints=common_timepoints, specie="CO2")] = ssp_CO2_emissions
+
+    return f
+
 
 def gen_fair_ensemble(
     scenarios,
@@ -43,13 +125,13 @@ def gen_fair_ensemble(
     cal_v = "1.4"
     constraint_set = "all-2022"
 
-    calibration_dir=prefix+f"/output/fair-{fair_v}/v{cal_v}/{constraint_set}/calibrations/"
-    posterior_dir=prefix+f"/output/fair-{fair_v}/v{cal_v}/{constraint_set}/posteriors/"
+    calibration_dir = prefix + f"/output/fair-{fair_v}/v{cal_v}/{constraint_set}/calibrations/"
+    posterior_dir = prefix + f"/output/fair-{fair_v}/v{cal_v}/{constraint_set}/posteriors/"
 
-    methane_config = calibration_dir+"CH4_lifetime.csv"
-    calibrated_params = posterior_dir+"calibrated_constrained_parameters.csv"
-    landuse_factors = calibration_dir+"landuse_scale_factor.csv"
-    lapsi_factors = calibration_dir+"lapsi_scale_factor.csv"
+    methane_config = calibration_dir + "CH4_lifetime.csv"
+    calibrated_params = posterior_dir + "calibrated_constrained_parameters.csv"
+    landuse_factors = calibration_dir + "landuse_scale_factor.csv"
+    lapsi_factors = calibration_dir + "lapsi_scale_factor.csv"
 
     # Loading the configuration dataframes
     df_methane = pd.read_csv(methane_config, index_col=0)
@@ -72,7 +154,7 @@ def gen_fair_ensemble(
     f.define_configs(valid_all)
     species, properties = read_properties()
 
-    # removed natural and species not accounted for in FaIR version and natural forcings 
+    # removed natural and species not accounted for in FaIR version and natural forcings
     species.remove("Halon-1202")
     species.remove("NOx aviation")
     species.remove("Contrails")
@@ -83,7 +165,7 @@ def gen_fair_ensemble(
     f.define_species(species, properties)
     f.allocate()
     f.fill_species_configs()
-    
+
     # climate response
     fill(
         f.climate_configs["ocean_heat_capacity"],
@@ -111,7 +193,7 @@ def gen_fair_ensemble(
     )
     fill(f.climate_configs["seed"], df_configs_subset["seed"])
     fill(f.climate_configs["stochastic_run"], False)
-    fill(f.climate_configs["use_seed"], False) 
+    fill(f.climate_configs["use_seed"], False)
     fill(f.climate_configs["forcing_4co2"], df_configs_subset["clim_F_4xCO2"])
 
     # carbon cycle
@@ -222,9 +304,7 @@ def gen_fair_ensemble(
         0.008275907538039383,
         specie="Halon-1211",
     )
-    fill(
-        f.species_configs["baseline_emissions"], 1.0386253894514322e-05, specie="SO2F2"
-    )
+    fill(f.species_configs["baseline_emissions"], 1.0386253894514322e-05, specie="SO2F2")
     fill(f.species_configs["baseline_emissions"], 0, specie="CF4")
 
     # aerosol direct
@@ -337,21 +417,16 @@ def gen_fair_ensemble(
     initialise(f.cumulative_emissions, 0)
     initialise(f.airborne_emissions, 0)
 
-    #fill emissions
+    # fill emissions
     # Emissions loading and initialization
-    anthro_emis = da_emissions.where(
-        ~da_emissions.specie.isin(["Solar", "Volcanic"]), drop=True
-    )
+    anthro_emis = da_emissions.where(~da_emissions.specie.isin(["Solar", "Volcanic"]), drop=True)
     anthro_emis = anthro_emis.sel(scenario=scenarios)
     anthro_emis = anthro_emis.interp(timepoints=f.timepoints, method="nearest")
     anthro_emis = anthro_emis.loc[dict(config="unspecified")]
-    f.emissions = (
-        anthro_emis.expand_dims(dim=["config"], axis=(2))
-        .drop("config")
-        * np.ones((1, 1, ensemble_members, 1))
-    )
+    f.emissions = anthro_emis.expand_dims(dim=["config"], axis=(2)).drop("config") * np.ones((1, 1, ensemble_members, 1))
 
     return f
+
 
 def plot_median(
     x,
@@ -404,13 +479,7 @@ def replace_chemical_notation(text):
 
 def set_plot_configs(plt, fsize=10):
     """Set the matplotlib parameters to the dersired Tex and font configs."""
-    plt.rcParams.update({
-        'text.usetex': True,               # Enable LaTeX for all text rendering
-        'font.family': 'sans-serif',       # Set font family to sans-serif
-        'font.sans-serif': ['Helvetica'],  # Use Helvetica as the sans-serif font
-        'text.latex.preamble': r'\usepackage{amsmath} \usepackage{helvet} \usepackage{sfmath} \renewcommand{\familydefault}{\sfdefault}',  
-        'font.size': fsize                    # Set the default font size
-    })
+    plt.rcParams.update({"text.usetex": True, "font.family": "sans-serif", "font.sans-serif": ["Helvetica"], "text.latex.preamble": r"\usepackage{amsmath} \usepackage{helvet} \usepackage{sfmath} \renewcommand{\familydefault}{\sfdefault}", "font.size": fsize})  # Enable LaTeX for all text rendering  # Set font family to sans-serif  # Use Helvetica as the sans-serif font  # Set the default font size
 
 
 def sum_forcing_set(forcing, species, name):
@@ -590,24 +659,17 @@ def aggregate_forcings(forcing):
     forcing = sum_forcing_set(forcing, short_halogens, "Short halogens")
     forcing = sum_forcing_set(forcing, long_halogens, "Long halogens")
 
-    forcing["specie"] = forcing["specie"].where(
-        forcing["specie"] != "Land use", "Land-use albedo"
-    )
+    forcing["specie"] = forcing["specie"].where(forcing["specie"] != "Land use", "Land-use albedo")
     forcing["specie"] = forcing["specie"].where(
         forcing["specie"] != "Light absorbing particles on snow and ice",
         "Particles on \n snow + ice",
     )
-    forcing["specie"] = forcing["specie"].where(
-        forcing["specie"] != "Aerosol-cloud interactions", "Aerosol-cloud"
-    )
-    forcing["specie"] = forcing["specie"].where(
-        forcing["specie"] != "Aerosol-radiation interactions", "Aerosol-radiation"
-    )
-    forcing["specie"] = forcing["specie"].where(
-        forcing["specie"] != "Stratospheric water vapour", "Stratospheric water vapor"
-    )
+    forcing["specie"] = forcing["specie"].where(forcing["specie"] != "Aerosol-cloud interactions", "Aerosol-cloud")
+    forcing["specie"] = forcing["specie"].where(forcing["specie"] != "Aerosol-radiation interactions", "Aerosol-radiation")
+    forcing["specie"] = forcing["specie"].where(forcing["specie"] != "Stratospheric water vapour", "Stratospheric water vapor")
 
     return forcing.forcing
+
 
 def get_color(scenario):
     ar6_colors = {
@@ -619,29 +681,38 @@ def get_color(scenario):
         "ssp460": "#b0724e",
         "ssp534-over": "#92397a",
         "ssp585": "#980002",
-        "historical": "black",        
+        "historical": "black",
     }
 
     return ar6_colors[scenario]
 
-def get_title(scenario):
-    
-   fancy_titles = {
-       "ssp119": "SSP1-1.9",
-       "ssp126": "SSP1-2.6",
-       "ssp245": "SSP2-4.5",
-       "ssp370": "SSP3-7.0",
-       "ssp434": "SSP4-3.4",
-       "ssp460": "SSP4-6.0",
-       "ssp534-over": "SSP5-3.4",
-       "ssp585": "SSP5-8.5",
-       "historical": "historical",       
-   }
 
-   return fancy_titles[scenario]
+def get_title(scenario):
+
+    fancy_titles = {
+        "ssp119": "SSP1-1.9",
+        "ssp126": "SSP1-2.6",
+        "ssp245": "SSP2-4.5",
+        "ssp370": "SSP3-7.0",
+        "ssp434": "SSP4-3.4",
+        "ssp460": "SSP4-6.0",
+        "ssp534-over": "SSP5-3.4",
+        "ssp585": "SSP5-8.5",
+        "historical": "historical",
+    }
+
+    return fancy_titles[scenario]
+
 
 def get_net_zero_GHG_time(scenario):
-    
-    net_zero_times = {'historical': 2025.5, 'ssp119': 2081.5, 'ssp126': 2088.5, 'ssp534-over': 2073.5}
 
-    return net_zero_times[scenario]
+    net_zero_GHG_times = {"historical": 2024.5, "ssp119": 2081.5, "ssp126": 2088.5, "ssp534-over": 2073.5}
+
+    return net_zero_GHG_times[scenario]
+
+
+def get_net_zero_CO2_time(scenario):
+
+    net_zero_CO2_times = {"historical": 2024.5, "ssp119": 2060.5, "ssp126": 2078.5, "ssp534-over": 2068.5}
+
+    return net_zero_CO2_times[scenario]

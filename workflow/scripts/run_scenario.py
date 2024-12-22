@@ -6,20 +6,29 @@ import os
 # Access parameters and wildcards from Snakemake
 
 scenario = snakemake.wildcards.scenario
+species = snakemake.wildcards.species
+end = snakemake.wildcards.end
+
 final_year = snakemake.params.final_year
 output_pkl = snakemake.output.output_pkl
 output_nc = snakemake.output.output_nc
-end = snakemake.wildcards.end
 
-net_zero_GHG_time = utils.get_net_zero_GHG_time(scenario)
+
+if species == "all":
+    f = utils.gen_fair_ensemble([scenario], final_year=final_year)
+elif species == "co2":
+    f = utils.gen_fair_co2_only([scenario], final_year=final_year)
     
-# Generate the ensemble
-f = utils.gen_fair_ensemble([scenario],
-                            final_year=final_year)
-if end == "zec":
+if end == "net-zero-zec":
+    net_zero_GHG_time = utils.get_net_zero_GHG_time(scenario)    
     utils.ZEC_emissions(f, net_zero_GHG_time)
-elif end == "decay":
+elif end == "net-zero-decay":
+    net_zero_GHG_time = utils.get_net_zero_GHG_time(scenario)    
     utils.decay_emissions(f, net_zero_GHG_time)    
+elif end == "2100-zec":
+    utils.ZEC_emissions(f, 2100)
+if end == "2024-zec":
+    utils.ZEC_emissions(f, 2024)    
 
 f.run()
 

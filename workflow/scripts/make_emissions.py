@@ -12,16 +12,19 @@ emissions_file = (
 )
 emissions = xr.load_dataarray(emissions_file)
 
-emissions = emissions.sel(
-    scenario=["ssp119", "ssp126", "ssp245", "ssp534-over"]
+historical = emissions.sel(
+    scenario=["ssp245"]
 )
-emissions = emissions.assign_coords(
-    scenario=["ssp119", "ssp126", "historical", "ssp534-over"]
+historical = historical.assign_coords(
+    scenario=["historical"]
 )
 
-emissions.loc[
+historical.loc[
     dict(timepoints=slice(2025, None), scenario="historical")
-] = emissions.loc[
+] = historical.loc[
     dict(timepoints=2024.5, scenario="historical")
 ]
-emissions.to_netcdf(utils.get_path("results/emissions.nc"))
+
+emissions_final = xr.concat([emissions, historical], dim="scenario")
+
+emissions_final.to_netcdf(utils.get_path("results/emissions.nc"))
