@@ -18,6 +18,11 @@ if species == "all":
     f = utils.gen_fair_ensemble([scenario], final_year=final_year)
 elif species == "co2":
     f = utils.gen_fair_co2_only([scenario], final_year=final_year)
+elif species == "all-relax-land":
+    f = utils.gen_fair_ensemble([scenario],
+                                relax_land=True,
+                                final_year=final_year,
+                                relax_land_year=2024)    
     
 if end == "net-zero-zec":
     net_zero_GHG_time = utils.get_net_zero_GHG_time(scenario)    
